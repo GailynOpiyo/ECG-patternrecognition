@@ -1,0 +1,67 @@
+[server]
+headless = true
+enableCORS = false
+port = 8501
+
+[theme]
+primaryColor = "#1f77b4"
+backgroundColor = "#f0f2f6"
+secondaryBackgroundColor = "#e5e5e5"
+textColor = "#333333"
+font = "sans serif"
+
+st.markdown("""
+    <style>
+    .title {
+        font-size: 40px;
+        font-weight: bold;
+        color: #4CAF50;
+        text-align: center;
+    }
+    .section-header {
+        font-size: 30px;
+        font-weight: 600;
+        color: #1f77b4;
+    }
+    .button {
+        background-color: #008CBA;
+        color: white;
+        font-size: 18px;
+        padding: 10px 20px;
+        border-radius: 5px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown('<p class="title">ECG Signal Analysis</p>', unsafe_allow_html=True)
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.header("Input Signal")
+    st.line_chart(signal)
+
+with col2:
+    st.header("Preprocessed Signal")
+    st.line_chart(processed_signal)
+
+sampling_rate = st.sidebar.slider(
+    "Sampling Rate (Hz)", 
+    min_value=500, 
+    max_value=5000, 
+    value=1000, 
+    step=100, 
+    help="Select the sampling rate for your signal"
+)
+st.markdown("""
+    <style>
+    .stButton>button {
+        background-color: #4CAF50;
+        color: white;
+        font-size: 18px;
+        border-radius: 5px;
+        padding: 10px 20px;
+        border: none;
+    }
+    </style>
+""", unsafe_allow_html=True)
