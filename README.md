@@ -37,7 +37,7 @@ pip install -r requirements.txt
 
 Run the application:
 
-    streamlit run app.py
+    streamlit run appmain.py
 
 Usage
 
