@@ -1,0 +1,10 @@
+streamlit
+joblib
+numpy
+pandas
+matplotlib
+scikit-learn
+tslearn
+scipy
+python-docx
+reportlab
