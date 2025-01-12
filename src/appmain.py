@@ -13,6 +13,16 @@ from io import BytesIO
 from docx import Document
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from ecg_db import (
+    register_user,
+    authenticate_user,
+    save_result,
+    get_results,
+    update_result,
+    delete_result,
+    init_db,
+)
+
 
 # Custom CSS to style the app
 st.markdown("""
@@ -67,6 +77,8 @@ st.markdown("""
     }
     </style>
     """, unsafe_allow_html=True)
+
+init_db()
 
 # Load pre-trained k-Shape and DBSCAN models
 @st.cache_resource
@@ -142,29 +154,61 @@ def generate_pdf_report(initial_signal, processed_signal, cluster_id, dbscan_lab
     
     return pdf_stream
 
-# Authentication function
-def authenticate(username, password):
-    correct_username = "user"
-    correct_password = "password"
-    return username == correct_username and password == correct_password
+# Function to show the registration form
+def show_registration_form():
+    st.title("ECG Signal Pattern Recognition")
+    st.write("Register")
 
-# Function to display the login form
+    # Username and Password fields
+    username = st.text_input("Enter a Username")
+    password = st.text_input("Enter a Password", type="password")
+    
+    # Registration button
+    if st.button("Register"):
+        if username and password:
+            # Register user and handle potential errors
+            if register_user(username, password):
+                st.success("Registration successful! You can now log in.")
+            else:
+                st.error("Username already exists. Please try a different one.")
+        else:
+            st.warning("Please fill in both username and password.")
+    
+    # Button to switch to login form
+    if st.button("Already have an account? Log in"):
+        st.session_state.page = "login"  # Change the page to login
+
+# Function to show the login form
 def show_login_form():
-    st.title("Login Page")
+    st.title("ECG Signal Pattern Recognition")
+    st.write("Login")
+
+    # Username and Password fields
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if authenticate(username, password):
-            st.session_state.logged_in = True
-            st.success("Login Successful!")
-            st.rerun()  # Reload the page to display the home page and navigation
-        else:
-            st.error("Invalid credentials, please try again.")
 
-# Check if the user is logged in
+    # Login button
+    if st.button("Login"):
+        if username and password:
+            user = authenticate_user(username, password)
+            if user:
+                st.session_state.logged_in = True
+                st.session_state.user_id = user[0]  # Store user ID
+                st.success("Login Successful!")
+                st.rerun()  # Reload the page to reflect logged-in state
+            else:
+                st.error("Invalid username or password.")
+        else:
+            st.warning("Please fill in both username and password.")
+
+# Check which page to show based on the session state
 if "logged_in" not in st.session_state or not st.session_state.logged_in:
-    # If not logged in, show the login page
-    show_login_form()
+    if "page" not in st.session_state or st.session_state.page == "register":
+        # Show the registration form
+        show_registration_form()
+    elif st.session_state.page == "login":
+        # Show the login form
+        show_login_form()
 else:
     # Once logged in, display the home page
 
@@ -175,7 +219,7 @@ else:
 
     # Navigation Sidebar
     st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Select a page", ["Signal Input", "Preprocessing", "Pattern Recognition", "Report Generation"], key="page_selector")
+    page = st.sidebar.radio("Select a page", ["Signal Input", "Preprocessing", "Pattern Recognition", "Reports"], key="page_selector")
 
     # Signal Input
     if page == "Signal Input":
@@ -241,110 +285,174 @@ else:
 
             # Provide download button
             st.download_button("Download Processed Signal", csv_signal, file_name="processed_signal.csv", mime="text/csv")
-
     if page == "Pattern Recognition":
+    # Initialize session states
+        if "dbscan_labels" not in st.session_state:
+          st.session_state.dbscan_labels = None
+        if "kshape_clusters" not in st.session_state:
+          st.session_state.kshape_clusters = None
+        if "processed_signal" not in st.session_state:
+          st.session_state.processed_signal = None
+
         if "signal" not in st.session_state:
-            st.warning("Please upload or generate a signal first.")
+           st.warning("Please upload or generate a signal first.")
         else:
-            if st.button("Run Pattern Recognition"):
-                signal = st.session_state.signal
-                sampling_rate = st.session_state.sampling_rate
+           if st.button("Run Pattern Recognition"):
+             signal = st.session_state.signal
+             sampling_rate = st.session_state.sampling_rate
 
-                # Load the pre-trained models for k-Shape and DBSCAN
-                kshape_model = load_kshape_model()
-                dbscan_model = load_dbscan_model()
+            # Load the pre-trained models for k-Shape and DBSCAN
+             kshape_model = load_kshape_model()
+             dbscan_model = load_dbscan_model()
 
-                # Preprocess the signal before applying clustering (bandpass filter)
-                processed_signal = bandpass_filter_custom(signal, lowcut=0.5, highcut=40.0, fs=sampling_rate)
+            # Preprocess the signal before applying clustering (bandpass filter)
+             processed_signal = bandpass_filter_custom(signal, lowcut=0.5, highcut=40.0, fs=sampling_rate)
 
-                # Reshape signal for DBSCAN (flatten the time series for clustering)
-                processed_signal_flat = processed_signal.reshape(-1, 1)  # Flatten signal for DBSCAN
+            # Reshape signal for DBSCAN (flatten the time series for clustering)
+             processed_signal_flat = processed_signal.reshape(-1, 1)
 
-                # Apply DBSCAN
-                eps = 0.5  # Example value for DBSCAN
-                min_samples = 5  # Example value for DBSCAN
-                dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-                dbscan_labels = dbscan.fit_predict(processed_signal_flat)
+            # Apply DBSCAN
+             eps = 0.5  # Example value for DBSCAN
+             min_samples = 5  # Example value for DBSCAN
+             dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+             dbscan_labels = dbscan.fit_predict(processed_signal_flat)
 
-                # Apply k-Shape clustering
-                processed_signal_reshaped = preprocess_signal(processed_signal)
-                kshape_clusters = kshape_model.predict(processed_signal_reshaped)
+            # Apply k-Shape clustering
+             processed_signal_reshaped = preprocess_signal(processed_signal)
+             kshape_clusters = kshape_model.predict(processed_signal_reshaped)
 
-                # Create side-by-side layout
-                col1, col2 = st.columns(2)
+            # Save results to session state
+             st.session_state.processed_signal = processed_signal
+             st.session_state.dbscan_labels = dbscan_labels
+             st.session_state.kshape_clusters = kshape_clusters
 
-                
-            # Display DBSCAN Clustering in the first column
-                with col1:
-                 st.subheader("DBSCAN Clustering")
-                 plt.figure(figsize=(8, 6))
-                 plt.plot(processed_signal_flat, label="Signal", color='grey', alpha=0.5)
+             st.success("Clustering completed!.")
 
-                # Highlight DBSCAN clusters
-                 plt.scatter(np.arange(len(processed_signal_flat)), processed_signal_flat, c=dbscan_labels, cmap="viridis", s=5)
-                 plt.title(f"DBSCAN Clustering")
-                 plt.xlabel("Sample Index")
-                 plt.ylabel("Amplitude")
-                 plt.legend()
-                 st.pyplot(plt)
+            # Display results
+             col1, col2 = st.columns(2)
 
-                # Display number of noise points (label = -1)
-                 noise_points = np.sum(dbscan_labels == -1)
-                 st.write(f"Number of noise points detected by DBSCAN: {noise_points}")
+             with col1:
+                st.subheader("DBSCAN Clustering")
+                plt.figure(figsize=(8, 6))
+                plt.plot(processed_signal_flat, label="Signal", color='grey', alpha=0.5)
+                plt.scatter(np.arange(len(processed_signal_flat)), processed_signal_flat, c=dbscan_labels, cmap="viridis", s=5)
+                plt.title("DBSCAN Clustering")
+                plt.xlabel("Sample Index")
+                plt.ylabel("Amplitude")
+                plt.legend()
+                st.pyplot(plt)
+                noise_points = np.sum(dbscan_labels == -1)
+                st.write(f"Number of noise points detected by DBSCAN: {noise_points}")
 
-            # Display k-Shape Clustering in the second column
-                with col2:
-                 st.subheader("k-Shape Clustering")
-                 custom_cluster_names = {0: "Normal", 1: "Arrythmia", 2: "Abnormal"} 
-
-                # Plot the processed signal with cluster highlights
-                 plt.figure(figsize=(8, 6))
-                 for i in range(np.max(kshape_clusters) + 1):  # Loop through all clusters
+             with col2:
+                st.subheader("k-Shape Clustering")
+                custom_cluster_names = {0: "Normal", 1: "Arrhythmia", 2: "Abnormal"}
+                plt.figure(figsize=(8, 6))
+                for i in range(np.max(kshape_clusters) + 1):
                     cluster_indices = np.where(kshape_clusters == i)[0]
                     cluster_name = custom_cluster_names.get(i, f"Cluster {i + 1}")
-                    plt.plot(processed_signal, color='lightgray', alpha=0.5)  # Plot all signals in light gray
+                    plt.plot(processed_signal, color='lightgray', alpha=0.5)
+                    plt.scatter(cluster_indices, processed_signal[cluster_indices], label=cluster_name, s=10)
+                plt.title("k-Shape Clustering")
+                plt.xlabel("Sample Index")
+                plt.ylabel("Amplitude")
+                plt.legend()
+                st.pyplot(plt)
+                st.write(f"Cluster Assigned: {cluster_name}")
 
-                    plt.scatter(cluster_indices, processed_signal[cluster_indices], label= cluster_name, s=10)
-                   
+        st.subheader("Save Your Clustering Results")
+        result_name = st.text_input("Enter a name for the result")
 
-                    plt.title(f"k-Shape Clustering")
-                    plt.xlabel("Sample Index")
-                    plt.ylabel("Amplitude")
-                    plt.legend()
-                    st.pyplot(plt)
-                    st.write(f"k-Shape Cluster ID: {kshape_clusters[0]}")
+        if st.button("Save Clustering Results"):
+            if result_name and st.session_state.dbscan_labels is not None and st.session_state.kshape_clusters is not None:
+                # Calculate number of noise points
+                noise_points = np.sum(st.session_state.dbscan_labels == -1)
+                custom_cluster_names = {0: "Normal", 1: "Arrhythmia", 2: "Abnormal"}
+                # Determine the cluster name based on the maximum cluster ID in k-Shape
+                if len(st.session_state.kshape_clusters) > 0:  # Ensure kshape_clusters has data
+                    max_cluster_id = int(np.max(st.session_state.kshape_clusters))  # Get max cluster ID
+                    cluster_name = custom_cluster_names.get(max_cluster_id, f"Cluster {max_cluster_id}")
+                else:
+                    cluster_name = "Unknown Cluster"  # Fallback if kshape_clusters is empty
+                # Prepare the result data to save
+                result_data =  {
+                     "noise_points":int(noise_points) ,
+                      
+                     "cluster_name": cluster_name
+                    }
+                save_result(st.session_state.user_id, result_name, str(result_data))
+                st.success("Result saved successfully!")
+            else:
+                st.warning("No clustering results found or name not provided.")
 
+   # View Saved Results Page
+    if page == "Reports":
+      st.header("View Saved Results")
 
-    if page == "Report Generation":
-        if "signal" not in st.session_state:
-            st.warning("Please upload or generate a signal first.")
-        else:
-            signal = st.session_state.signal
-            sampling_rate = st.session_state.sampling_rate
+# Button to fetch saved results
+      if st.button("View Saved Results"):
+         if "user_id" in st.session_state:  # Ensure user_id exists in session state
+    # Fetch results for the logged-in user
+             all_results = get_results(st.session_state.user_id)
 
-            if st.button("Generate Report"):
-                # Load the pre-trained models
-                kshape_model = load_kshape_model()
-                dbscan_model = load_dbscan_model()
+    # Filter results for the logged-in user
+             user_id = st.session_state.user_id
+             user_results = [result for result in all_results if result[1] == user_id]  # Assuming user_id is the second field
 
-                # Process the signal and apply clustering models
-                processed_signal = bandpass_filter_custom(signal, lowcut=0.5, highcut=40.0, fs=sampling_rate)
-                processed_signal_flat = processed_signal.reshape(-1, 1)  # Flatten signal for DBSCAN
+             if user_results:  # Check if user-specific results are not empty
+        # Create a DataFrame for user-specific results
+                 
+                 df = pd.DataFrame(user_results, columns=["Result ID", "User ID", "Result Name", "Result Data"])
 
-                # Apply DBSCAN
-                dbscan = DBSCAN(eps=0.5, min_samples=5)
-                dbscan_labels = dbscan.fit_predict(processed_signal_flat)
+        # Display results in a custom table format
+                 st.write("**Manage Results**")
+                 for index, row in df.iterrows():
+                     result_id = row["Result ID"]
+                     user_id = row["User ID"]
+                     result_name = row["Result Name"]
+                     result_data = row["Result Data"]
 
-                # Apply k-Shape
-                processed_signal_reshaped = preprocess_signal(processed_signal)
-                kshape_clusters = kshape_model.predict(processed_signal_reshaped)
-                
-                # Generate report
-                report_format = st.selectbox("Select Report Format", ("Word", "PDF"))
-                if report_format == "Word":
-                    report = generate_word_report(signal, processed_signal, kshape_clusters[0], dbscan_labels, plt)
-                    report.save("ecg_report.docx")
-                    st.download_button("Download Word Report", "ecg_report.docx", file_name="ecg_report.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                elif report_format == "PDF":
-                    pdf_report = generate_pdf_report(signal, processed_signal, kshape_clusters[0], dbscan_labels, plt)
-                    st.download_button("Download PDF Report", pdf_report, file_name="ecg_report.pdf", mime="application/pdf")
+                     cols = st.columns([4,4, 1, 1])  # Adjust column widths as needed
+                     #with cols[0]:
+                        # st.write("Results ID")
+                        # st.write(result_id)
+                    # with cols[1]:
+                         #st.write("Results ID")
+                         #st.write(user_id)
+                     with cols[0]:
+                         st.write("Result Name:")
+                         st.write(result_name)
+                     with cols[1]:
+                         st.write("Data:")
+                         st.write(result_data)
+
+            # Group actions inside a form to prevent page refreshing
+                     with st.form(key=f"edit_delete_form_{result_id}", clear_on_submit=True):
+                      for result_id, result_name, result_data in user_results:     
+                         edit_button = st.form_submit_button("✏️ Edit")
+                         delete_button = st.form_submit_button("🗑️ Delete")
+        
+             if edit_button:
+                new_name = st.text_input(f"Edit Result Name for '{result_name}'", value=result_name, key=f"new_name_{result_id}")
+                save_button = st.form_submit_button(f"Save Changes for {result_name}", key=f"save_{result_id}")
+                if save_button:
+                     if update_result(result_id, new_name, result_data):  # Keep result_data unchanged
+                        st.session_state.edit_success = True
+                        st.success(f"Result name updated to '{new_name}' successfully!")
+                        st.experimental_rerun()
+                     else:
+                        st.error(f"Failed to update '{result_name}'.")
+
+             if delete_button:
+                     if delete_result(result_id):
+                        st.session_state.delete_success = True
+                        st.success(f"Result '{result_name}' deleted successfully!")
+                        st.experimental_rerun()
+                     else:
+                        st.error(f"Failed to delete '{result_name}'.")
+
+             else:
+                 st.info(f"No saved results found for User {user_id}.")
+         else:
+             st.warning("User not logged in or session expired.")
+
